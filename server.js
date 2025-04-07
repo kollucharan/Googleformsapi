@@ -11,7 +11,7 @@ const oauth2Client = new google.auth.OAuth2(
   process.env.REDIRECT_URI
 );
 
-// Step 1: Start OAuth Flow
+
 app.get('/auth', (req, res) => {
   const authUrl = oauth2Client.generateAuthUrl({
     access_type: 'offline',
@@ -20,19 +20,19 @@ app.get('/auth', (req, res) => {
   res.redirect(authUrl);
 });
 
-// Step 2: Callback URI
+
 app.get('/oauth2callback', async (req, res) => {
   const code = req.query.code;
   const { tokens } = await oauth2Client.getToken(code);
   oauth2Client.setCredentials(tokens);
-  req.app.set('authClient', oauth2Client); // Save in memory
+  req.app.set('authClient', oauth2Client); 
   res.send('Authentication successful! You can now use the API.');
 });
 
-// Step 3: API to create form
+
 app.post('/create-form', async (req, res) => {
-  // const authClient = req.app.get('authClient');
-  // if (!authClient) return res.status(401).send({ error: 'User not authenticated' });
+  const authClient = req.app.get('authClient');
+  if (!authClient) return res.status(401).send({ error: 'User not authenticated' });
 
   const forms = google.forms({ version: 'v1', auth: authClient });
 
@@ -45,7 +45,6 @@ app.post('/create-form', async (req, res) => {
   try {
     const createdForm = await forms.forms.create({ requestBody: newForm });
 
-    // Add questions using batchUpdate
     const updateReq = {
       formId: createdForm.data.formId,
       requestBody: {
