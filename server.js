@@ -31,8 +31,8 @@ app.get('/oauth2callback', async (req, res) => {
 
 // Step 3: API to create form
 app.post('/create-form', async (req, res) => {
-  const authClient = req.app.get('authClient');
-  if (!authClient) return res.status(401).send({ error: 'User not authenticated' });
+  // const authClient = req.app.get('authClient');
+  // if (!authClient) return res.status(401).send({ error: 'User not authenticated' });
 
   const forms = google.forms({ version: 'v1', auth: authClient });
 
