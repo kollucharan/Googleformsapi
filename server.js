@@ -1,155 +1,79 @@
-
-// 'use strict';
-
-// const express = require('express');
-// const path = require('path');
-// const { google } = require('@googleapis/forms');
-// const { authenticate } = require('@google-cloud/local-auth');
-
-// const app = express();
-// const port = 3000;
-
-
-// app.use(express.json());
-
-// let authClient;
-
-
-// async function initAuth() {
-//   authClient = await authenticate({
-//     keyfilePath: path.join(__dirname, 'credentials.json'),
-//     scopes: ['https://www.googleapis.com/auth/forms.body'],
-//   });
-// }
-
-// // Route to create a Google Form
-// app.post('/create-form', async (req, res) => {
-//   try {
-//     if (!authClient) await initAuth();
-
-//     const forms = google.forms({ version: 'v1', auth: authClient });
-
-//     const newForm = {
-//       info: {
-//         title: 'Generated Form via Express',
-//         description: 'This form is created by your Express backend!',
-//       },
-//     };
-
-//     const formResponse = await forms.forms.create({
-//       requestBody: newForm,
-//     });
-
-//     res.status(200).json({
-//       message: 'Form created successfully',
-//       formId: formResponse.data.formId,
-//       formUrl: `https://docs.google.com/forms/d/${formResponse.data.formId}/edit`,
-//     });
-//   } catch (error) {
-//     console.error('Error creating form:', error);
-//     res.status(500).json({ error: 'Failed to create form' });
-//   }
-// });
-
-// app.listen(port, () => {
-//   console.log(`Server is running at http://localhost:${port}`);
-// });
-
-
-
-
 const express = require('express');
 const { google } = require('googleapis');
-const { authenticate } = require('@google-cloud/local-auth');
-const path = require('path');
-const cors = require('cors');
+require('dotenv').config();
 
 const app = express();
-app.use(cors());
 app.use(express.json());
 
-let oauth2Client;
+const oauth2Client = new google.auth.OAuth2(
+  process.env.CLIENT_ID,
+  process.env.CLIENT_SECRET,
+  process.env.REDIRECT_URI
+);
 
-async function initAuth() {
-  oauth2Client = await authenticate({
-    keyfilePath: path.join(__dirname, 'credentials.json'), // must exist
-    scopes: ['https://www.googleapis.com/auth/forms.body'],
+// Step 1: Start OAuth Flow
+app.get('/auth', (req, res) => {
+  const authUrl = oauth2Client.generateAuthUrl({
+    access_type: 'offline',
+    scope: ['https://www.googleapis.com/auth/forms.body'],
   });
+  res.redirect(authUrl);
+});
 
-  console.log('✅ Authenticated successfully');
-}
+// Step 2: Callback URI
+app.get('/oauth2callback', async (req, res) => {
+  const code = req.query.code;
+  const { tokens } = await oauth2Client.getToken(code);
+  oauth2Client.setCredentials(tokens);
+  req.app.set('authClient', oauth2Client); // Save in memory
+  res.send('Authentication successful! You can now use the API.');
+});
 
+// Step 3: API to create form
 app.post('/create-form', async (req, res) => {
+  const authClient = req.app.get('authClient');
+  if (!authClient) return res.status(401).send({ error: 'User not authenticated' });
+
+  const forms = google.forms({ version: 'v1', auth: authClient });
+
+  const newForm = {
+    info: {
+      title: req.body.title || 'My Form',
+    },
+  };
+
   try {
-    const questions = req.body.questions;
+    const createdForm = await forms.forms.create({ requestBody: newForm });
 
-    const forms = google.forms({ version: 'v1', auth: oauth2Client });
-
-    // STEP 1: Create form with only the title
-    const formCreateRes = await forms.forms.create({
+    // Add questions using batchUpdate
+    const updateReq = {
+      formId: createdForm.data.formId,
       requestBody: {
-        info: {
-          title: 'Generated Questions',
-        },
-      },
-    });
-
-    const formId = formCreateRes.data.formId;
-
-    // STEP 2: Prepare batch update requests
-    const batchRequests = [];
-
-    // Add description
-    batchRequests.push({
-      updateFormInfo: {
-        info: {
-          description: 'Please share your honest feedback!',
-        },
-        updateMask: 'description',
-      },
-    });
-
-    // Add each question
-    questions.forEach((q, index) => {
-      batchRequests.push({
-        createItem: {
-          item: {
-            title: q.question,
-            questionItem: {
-              question: {
-                required: true,
-                textQuestion: {},
+        requests: req.body.questions.map((q, index) => ({
+          createItem: {
+            item: {
+              title: q.question,
+              questionItem: {
+                question: {
+                  required: true,
+                  textQuestion: {},
+                },
               },
             },
+            location: {
+              index: index,
+            },
           },
-          location: {
-            index,
-          },
-        },
-      });
-    });
-
-    // STEP 3: Send batchUpdate
-    await forms.forms.batchUpdate({
-      formId,
-      requestBody: {
-        requests: batchRequests,
+        })),
       },
-    });
+    };
 
-    res.json({
-      formUrl: `https://docs.google.com/forms/d/${formId}/edit`,
-      message: 'Form created successfully!',
-    });
-
+    await forms.forms.batchUpdate(updateReq);
+    res.send({ formUrl: `https://docs.google.com/forms/d/${createdForm.data.formId}/edit` });
   } catch (error) {
-    console.error("❌ Error creating form:", error);
-    res.status(500).json({ error: "Failed to create form", details: error.message });
+    console.error('Error creating form:', error);
+    res.status(500).send({ error: 'Failed to create form' });
   }
 });
 
-initAuth().then(() => {
-  app.listen(3000, () => {
-    console.log('🚀 Server running at http://localhost:3000');
-  });
-});
+app.listen(3000, () => console.log('Server running at http://localhost:3000'));
